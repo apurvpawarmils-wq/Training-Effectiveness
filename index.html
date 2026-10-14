@@ -27,7 +27,8 @@ html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,
 .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(20,30,60,.06);}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;}
 label{display:block;font-size:.75rem;color:var(--muted);margin:7px 0 3px;}
-input,select{width:100%;padding:6px 7px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;}
+input,select,textarea{width:100%;padding:6px 7px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;}
+textarea{resize:vertical;font-family:inherit;}
 fieldset{border:1px solid var(--border);border-radius:10px;margin:8px 0;padding:10px;}
 legend{font-weight:600;font-size:.82rem;padding:0 6px;}
 .btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:.85rem;cursor:pointer;margin-top:10px;margin-right:6px;}
@@ -105,14 +106,45 @@ details.fold details.fold>summary .cnt{background:var(--violet);}
 .tdHead{background:linear-gradient(135deg,var(--accent2),var(--accent));color:#fff;text-align:center;font-weight:700;font-size:1.1rem;padding:12px;}
 .tdRow{display:grid;grid-template-columns:minmax(120px,32%) 1fr;gap:12px;padding:12px 16px;border-bottom:2px solid #e0b02f;font-size:.88rem;}
 .tdRow:last-child{border-bottom:0;}
+.tdBar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;font-size:.8rem;}
+.tdBar .btn{margin:0;}
+.tdTools{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);}
+.btn.mini{padding:4px 11px;font-size:.72rem;margin:0;}
+.pill{font-size:.66rem;border-radius:10px;padding:2px 9px;font-weight:600;color:#fff;}
+.pill.on{background:var(--good);} .pill.off{background:var(--muted);}
+.formBox{max-width:540px;text-align:left;border-top:6px solid var(--accent);max-height:90vh;overflow:auto;}
+.formBox h2{color:var(--accent);}
+.formBox .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;}
+.formBox .err{color:var(--bad);font-size:.78rem;margin-top:6px;min-height:1em;}
 .tdRow b{color:var(--muted);font-weight:600;}
 .tdRow span{font-weight:600;}
 .tdRow span div{margin:2px 0;}
-details.addPart{border:1px dashed var(--border);border-radius:10px;padding:8px 10px;margin-top:10px;}
+details.addPart,div.addPart{border:1px dashed var(--border);border-radius:10px;padding:8px 10px;margin-top:10px;}
+div.addPart .addTitle{font-size:.8rem;color:var(--accent);font-weight:600;}
 details.addPart>summary{cursor:pointer;font-size:.8rem;color:var(--accent);font-weight:600;}
 </style>
 </head>
 <body>
+<div id="tdModal" class="modalBack hidden"><div class="modalBox formBox">
+  <h2 id="tdFormTitle">Add training</h2>
+  <input type="hidden" id="tf_id">
+  <label>Training Title</label><input id="tf_title">
+  <label>Mode</label><input id="tf_mode" placeholder="e.g. Classroom &amp; Onsite Training">
+  <label>Duration</label><input id="tf_duration" placeholder="e.g. 06 Days">
+  <label>Date (one batch per line)</label><textarea id="tf_dates" rows="3" placeholder="Batch-I : 31 Aug. to 05 Sept.’26&#10;Batch-II : 07 Sept. to 12 Sept.’26"></textarea>
+  <label>Trainer's Name</label><input id="tf_trainer">
+  <label>Location</label><input id="tf_location">
+  <label>Total Participants</label><input id="tf_total" placeholder="e.g. 46 Welders">
+  <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:.82rem;color:var(--text);"><input type="checkbox" id="tf_visible" checked style="width:auto;"> Show this training to everyone</label>
+  <div class="err" id="tf_err"></div>
+  <div class="row"><button class="btn" type="button" id="tfSave" onclick="saveTraining()">Save</button><button class="btn sec" type="button" onclick="closeTrainingForm()">Cancel</button></div>
+</div></div>
+<div id="pwModal" class="modalBack hidden"><div class="modalBox formBox" style="max-width:360px;">
+  <h2>Admin login</h2>
+  <label>Admin password</label><input id="pw_input" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')submitAdminLogin()">
+  <div class="err" id="pw_err"></div>
+  <div class="row"><button class="btn" type="button" id="pwBtn" onclick="submitAdminLogin()">Log in</button><button class="btn sec" type="button" onclick="closePw()">Cancel</button></div>
+</div></div>
 <div id="trainModal" class="modalBack hidden"><div class="modalBox"><h2>⚠ Needs Training</h2><p id="trainModalMsg"></p><p class="def" id="trainModalNote"></p><button class="btn" type="button" onclick="closeTrainModal()">OK</button></div></div>
 <div class="hero"><div class="wrap" style="padding:0;"><h1>Central L&amp;D Cell East Cluster Rawan Cement Works</h1><span class="heroSub">Post Training Effectiveness Framework</span></div></div>
 <div class="wrap">
@@ -126,12 +158,12 @@ details.addPart>summary{cursor:pointer;font-size:.8rem;color:var(--accent);font-
   <div class="tab" data-t="dash">Dashboard</div>
 </div>
 
-<!-- TRAINING DETAILS (read-only) -->
+<!-- TRAINING DETAILS (editable by the admin only) -->
 <div id="view-details">
-  <div class="card tdCard">
-    <div class="tdHead">Training Details</div>
-    <div id="tdBody"></div>
-  </div>
+  <div id="tdWarn"></div>
+  <div id="tdAdminBar" class="tdBar"></div>
+  <div id="tdList"></div>
+  <div id="tdFoot" class="def" style="text-align:right;margin-top:6px;"></div>
 </div>
 
 <!-- ASSESSMENT -->
@@ -143,6 +175,15 @@ details.addPart>summary{cursor:pointer;font-size:.8rem;color:var(--accent);font-
       <select id="assessPart" onchange="loadParticipant()" style="margin-top:6px;"></select>
       <div class="def" id="assessCount" style="margin-top:4px;"></div>
       <div class="def" id="partInfo"></div>
+      <div class="addPart" id="uploadBox">
+        <div class="addTitle">Upload Excel — participants with pre-test / post-test scores</div>
+        <div class="def">Reads these columns: Name, ID No., Category, Department, IUs / GUs, Contractor, Batch, Pre-Test, Post-Test (scores out of 10; a value above 10 is read as a percentage). A title/banner row above the headings is skipped. The people appear in the list above and the scores fill the pre-test / post-test boxes when you select them. Someone already in the list (same ID No.) gets updated, not added twice.</div>
+        <div class="grid"><div><label>Training for this upload</label><select id="up_training"></select></div></div>
+        <input type="file" id="upFile" accept=".xlsx,.xls,.csv" style="margin-top:8px;">
+        <button class="btn" type="button" id="uploadBtn" onclick="uploadParticipants()">Upload &amp; Fetch</button>
+        <button class="btn sec" type="button" onclick="downloadTemplate()">Download Excel template</button>
+        <div class="def" id="upMsg" style="margin-top:6px;"></div>
+      </div>
       <details class="addPart">
         <summary>Participant not in the list? Add participant</summary>
         <div class="grid">
@@ -152,7 +193,8 @@ details.addPart>summary{cursor:pointer;font-size:.8rem;color:var(--accent);font-
           <div><label>Department</label><input id="np_department"></div>
           <div><label>IUs / GUs</label><input id="np_ius"></div>
           <div><label>Contractor for CWM</label><input id="np_contractor"></div>
-          <div><label>Batch</label><select id="np_batch"></select></div>
+          <div><label>Training</label><select id="np_training"></select></div>
+          <div><label>Batch</label><input id="np_batch" placeholder="e.g. Batch I"></div>
         </div>
         <button class="btn" type="button" id="addParticipantBtn" onclick="addParticipant()">Add Participant</button>
       </details>
@@ -246,26 +288,6 @@ document.getElementById('enablerGrid').innerHTML = ENABLERS.map((e,i)=>`
   <div style="margin:8px 0;"><label>${e[0]}</label><div class="def">${e[1]}</div>
   <select id="r${i}" onchange="recalc()">${RATINGOPTS.map(o=>`<option value="${o[0]}">${o[1]}</option>`).join('')}</select></div>`).join('');
 
-// ===== Programme settings (single training programme) =====
-const TRAINING={
-  title:'Welder’s Upskilling Training',
-  mode:'Classroom & Onsite Training',
-  duration:'06 Days',
-  trainer:'Mr. U. Meghavanan (TATA INDIAN INSTITUTE OF SKILLS)',
-  location:'Rawan Cement Works',
-  total:'46 Welders',
-  batches:{
-    'Batch I': {from:'2026-08-31', to:'2026-09-05', label:'Batch-I : 31 Aug. to 05 Sept.’26'},
-    'Batch II':{from:'2026-09-07', to:'2026-09-12', label:'Batch-II : 07 Sept. to 12 Sept.’26'}
-  }
-};
-document.getElementById('tdBody').innerHTML=[
-  ['Training Title:',TRAINING.title],['Mode :',TRAINING.mode],['Duration:',TRAINING.duration],
-  ['Date :',Object.values(TRAINING.batches).map(b=>'<div>'+b.label+'</div>').join('')],
-  ['Trainer\'s Name',TRAINING.trainer],['Location :',TRAINING.location],['Total Participants:',TRAINING.total]
-].map(r=>`<div class="tdRow"><b>${r[0]}</b><span>${r[1]}</span></div>`).join('');
-document.getElementById('np_batch').innerHTML=Object.keys(TRAINING.batches).map(k=>`<option>${k}</option>`).join('');
-
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>showTab(t.dataset.t));
 function showTab(t){
   document.querySelectorAll('[id^="view-"]').forEach(v=>v.classList.toggle('hidden', v.id!=='view-'+t));
@@ -273,12 +295,15 @@ function showTab(t){
   if(t==='records') renderRecords();
   if(t==='profile') { fillProfileSel(); drawProfile(); }
   if(t==='dash') renderDash();
-  if(t==='assess') fillAssessSel();
+  if(t==='assess'){ fillAssessSel(); fillTrainingSelects(); }
+  if(t==='details') renderTrainings();
 }
 
 // >>> After deploying the new Apps Script, paste its Web app URL between the quotes below <<<
 const API_URL = "https://script.google.com/macros/s/AKfycbx8oVaJ4KwUz5EFm0gbTt6E4aAdh4cLPs9t-f59fAW5aGAUj5dpOdc2Bgsskrn3Xrkt/exec";
-let participants=[], assessments=[], isRefreshing=false, firstLoadDone=false;
+let participants=[], assessments=[], trainings=[], isRefreshing=false, firstLoadDone=false, backendV3=false;
+let adminKey=''; try{ adminKey=sessionStorage.getItem('rcw_admin')||''; }catch(e){}
+let isAdmin=!!adminKey;   // confirmed by the server on every sync / save
 function setStatus(msg, state){
   const el=document.getElementById('syncStatus'); if(el) el.textContent=msg;
   const dot=document.getElementById('syncDot');
@@ -289,16 +314,19 @@ async function runPool(items,worker,limit){
   let i=0; const n=Math.min(limit||CONCURRENCY,items.length);
   await Promise.all(Array.from({length:n},async()=>{ while(i<items.length){ const k=i++; await worker(items[k],k); } }));
 }
-function saveCache(){ try{ localStorage.setItem('rcw_cache',JSON.stringify({p:participants,a:assessments})); }catch(e){} }
+function isVis(t){ return t.visible===true || String(t.visible).toLowerCase()==='true'; }
+// only trainings everyone may see are kept in this browser's saved copy
+function saveCache(){ try{ localStorage.setItem('rcw_cache',JSON.stringify({p:participants,a:assessments,t:trainings.filter(isVis)})); }catch(e){} }
 let hadCache=false;
-try{ const c=JSON.parse(localStorage.getItem('rcw_cache')||'null'); if(c&&c.p&&c.a){ participants=c.p; assessments=c.a; hadCache=true; } }catch(e){}
+try{ const c=JSON.parse(localStorage.getItem('rcw_cache')||'null'); if(c&&c.p&&c.a){ participants=c.p; assessments=c.a; trainings=c.t||[]; hadCache=true; } }catch(e){}
 let syncPaused=0; // >0 while a bulk write is running, so a background refresh can't collide with it
 const REFRESH_MS=30000; // background refresh interval — also re-syncs a couple of seconds after every save, so other units' changes show up quickly
 function renderCurrent(){
   // only redraw what the person is looking at; other tabs redraw when opened
-  fillAssessSel();
+  fillAssessSel(); fillTrainingSelects();
   const t=(document.querySelector('.tab.active')||{}).dataset; const tab=t&&t.t;
-  if(tab==='records') renderRecords();
+  if(tab==='details') renderTrainings();
+  else if(tab==='records') renderRecords();
   else if(tab==='profile'){ fillProfileSel(); drawProfile(); }
   else if(tab==='dash') renderDash();
 }
@@ -310,18 +338,21 @@ async function refreshAll(force){
   isRefreshing=true;
   setStatus(firstLoadDone? 'Syncing…' : (hadCache? 'Showing saved data — syncing…' : 'Connecting…'), 'busy');
   try{
-    const [p,a] = await Promise.all([apiList('participants'), apiList('assessments')]);
+    const [p,a,t] = await Promise.all([apiList('participants'), apiList('assessments'), apiTrainings()]);
     const mp = Array.isArray(p) ? mergeLocal('participants',p) : null;
     const ma = Array.isArray(a) ? mergeLocal('assessments',a) : null;
-    const changed = !firstLoadDone || (mp && JSON.stringify(mp)!==JSON.stringify(participants)) || (ma && JSON.stringify(ma)!==JSON.stringify(assessments));
+    const mt = Array.isArray(t) ? mergeLocal('trainings',t) : null;
+    const changed = !firstLoadDone || (mp && JSON.stringify(mp)!==JSON.stringify(participants)) || (ma && JSON.stringify(ma)!==JSON.stringify(assessments)) || (mt && JSON.stringify(mt)!==JSON.stringify(trainings));
     if(mp) participants=mp;
     if(ma) assessments=ma;
-    const bothOk = !!(p && a);
+    if(mt) trainings=mt;
+    const bothOk = !!(p && a && t!==null);
     firstLoadDone = true;
     if(changed){ renderCurrent(); saveCache(); }
     setStatus(bothOk? 'Up to date · '+new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : apiErrorText(), bothOk?'ok':'err');
   } finally { isRefreshing=false; }
 }
+renderTrainings(); fillTrainingSelects();
 refreshAll();
 if(hadCache) setTimeout(renderCurrent,0);
 setInterval(refreshAll, REFRESH_MS);
@@ -340,7 +371,7 @@ async function apiList(type){
 function apiErrorText(){
   return lastApiError==='access' ? 'Backend refused access — redeploy as Web app: Execute as Me, access Anyone'
        : lastApiError==='slow'   ? 'Backend not responding (30s) — check the URL / deployment'
-       : lastApiError==='net'    ? 'Cannot reach backend — check internet and the Web app URL'
+       : lastApiError==='net'    ? 'Cannot reach backend — URL must end in /exec and Who has access must be Anyone'
        : lastApiError==='bad'    ? 'Backend replied with an error — open the script Executions log'
        : 'Partial data — retrying…';
 }
@@ -354,6 +385,7 @@ function scheduleSync(){ clearTimeout(syncTimer); syncTimer=setTimeout(()=>refre
 async function postJSON(body, idempotent){
   for(let attempt=0; attempt<4; attempt++){
     try{
+      if(body.type==='trainings' && adminKey && !body.key) body.key=adminKey;
       const r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)});
       const j=await r.json();
       if(j && j.ok===false && j.error==='busy' && attempt<3){ await sleep(700*Math.pow(2,attempt)+Math.random()*500); continue; }
@@ -371,6 +403,37 @@ async function apiAdd(type,data){
   const res=await postJSON({type,action:'add',data},false);
   if(res&&res.ok){ localAdds.set(type+':'+res.id,{type,obj:Object.assign({id:res.id},data),t:Date.now()}); scheduleSync(); }
   return res||{ok:false};
+}
+// Many rows in one request (a few seconds for a whole Excel file instead of minutes).
+async function apiAddMany(type,recs){
+  const res=await postJSON({type,action:'addMany',data:recs},false);
+  if(res&&res.ok&&Array.isArray(res.ids)&&res.ids.length===recs.length){
+    const now=Date.now();
+    res.ids.forEach((id,i)=>{ if(id) localAdds.set(type+':'+id,{type,obj:Object.assign({id},recs[i]),t:now}); });
+    scheduleSync(); return res;
+  }
+  if(res&&res.error==='unknown action') return {ok:false,unsupported:true};
+  return {ok:false};
+}
+async function apiUpdateMany(type,items){
+  const res=await postJSON({type,action:'updateMany',data:items},true);
+  if(res&&res.ok){ const now=Date.now(); items.forEach(it=>localUpdates.set(type+':'+it.id,{data:Object.assign({},it.data),t:now})); scheduleSync(); return res; }
+  if(res&&res.error==='unknown action') return {ok:false,unsupported:true};
+  return {ok:false};
+}
+// Training details: everyone gets the ones marked "show"; the admin (password checked by the script) gets all of them.
+async function apiTrainings(){
+  if(adminKey){
+    const r=await postJSON({type:'trainings',action:'listAll',key:adminKey},true);
+    if(r&&r.ok&&Array.isArray(r.trainings)){ backendV3=true; isAdmin=true; return r.trainings; }
+    if(r&&r.error==='unauthorized'){ adminKey=''; isAdmin=false; try{sessionStorage.removeItem('rcw_admin');}catch(e){} }
+    else if(r===null) return null;                       // connection problem
+  }
+  isAdmin=!!adminKey;
+  const j=await apiList('trainings');
+  if(j&&!Array.isArray(j)&&Array.isArray(j.trainings)){ backendV3=true; return j.trainings; }
+  if(Array.isArray(j)){ backendV3=false; return []; }     // old script: it has no training list
+  return null;
 }
 async function apiDelete(type,id){
   localDeletes.set(type+':'+id,Date.now());
@@ -393,20 +456,225 @@ function mergeLocal(type,server){
   return out;
 }
 
+// ===== Training Details (view for everyone, add / edit / show-hide for the admin) =====
+function trainingsSorted(){ return trainings.slice().sort((a,b)=>(numv(a.ts)-numv(b.ts))||String(a.title).localeCompare(String(b.title))); }
+function trainingCard(t){
+  const row=(l,v)=> (v===''||v==null)?'':`<div class="tdRow"><b>${l}</b><span>${v}</span></div>`;
+  const dates=String(t.dates==null?'':t.dates).split(/\r?\n/).map(x=>x.trim()).filter(Boolean).map(x=>'<div>'+esc(x)+'</div>').join('');
+  const tools=isAdmin?`<div class="tdTools"><span class="pill ${isVis(t)?'on':'off'}">${isVis(t)?'Shown to everyone':'Hidden'}</span>
+      <button class="btn mini" type="button" onclick="openTrainingForm('${esc(t.id)}')">Edit</button>
+      <button class="btn sec mini" type="button" onclick="toggleTraining('${esc(t.id)}')">${isVis(t)?'Hide':'Show'}</button>
+      <button class="btn danger" type="button" onclick="deleteTraining('${esc(t.id)}')">Delete</button></div>`:'';
+  return `<div class="card tdCard"><div class="tdHead">Training Details</div>${tools}
+    ${row('Training Title:',esc(t.title))}${row('Mode :',esc(t.mode))}${row('Duration:',esc(t.duration))}${row('Date :',dates)}
+    ${row('Trainer\'s Name',esc(t.trainer))}${row('Location :',esc(t.location))}${row('Total Participants:',esc(t.total))}</div>`;
+}
+function renderTrainings(){
+  const list=trainingsSorted();
+  document.getElementById('tdWarn').innerHTML = (firstLoadDone && !backendV3)
+    ? '<div class="card"><b>The Google Script needs updating.</b><div class="def">Paste the latest Code-Rawan.gs into Apps Script and redeploy it (Deploy → Manage deployments → pencil → New version). Training details appear after that.</div></div>' : '';
+  document.getElementById('tdAdminBar').innerHTML = isAdmin
+    ? '<span>🔒 Admin mode — people you share the link with only see trainings marked “Shown”.</span><button class="btn" type="button" onclick="openTrainingForm()">+ Add training</button><button class="btn sec" type="button" onclick="adminLogout()">Log out</button>' : '';
+  document.getElementById('tdFoot').innerHTML = (!isAdmin && backendV3) ? '<a href="#" onclick="adminLogin();return false;" style="color:var(--muted);">Admin login</a>' : '';
+  document.getElementById('tdList').innerHTML = list.length ? list.map(trainingCard).join('')
+    : `<div class="card"><p class="def">${firstLoadDone? (isAdmin? 'No training added yet — click “+ Add training”.' : 'No training details have been published yet.') : 'Loading training details…'}</p></div>`;
+}
+function adminLogin(){ document.getElementById('pw_input').value=''; document.getElementById('pw_err').textContent=''; document.getElementById('pwModal').classList.remove('hidden'); setTimeout(()=>document.getElementById('pw_input').focus(),50); }
+function closePw(){ document.getElementById('pwModal').classList.add('hidden'); }
+async function submitAdminLogin(){
+  const key=document.getElementById('pw_input').value; if(!key) return;
+  const btn=document.getElementById('pwBtn'); if(btn.disabled) return; btn.disabled=true; btn.textContent='Checking…';
+  const r=await postJSON({action:'verify',key},true);
+  btn.disabled=false; btn.textContent='Log in';
+  if(r&&r.ok){ adminKey=key; isAdmin=true; try{sessionStorage.setItem('rcw_admin',key);}catch(e){} closePw(); renderTrainings(); await refreshAll(true); renderTrainings(); fillTrainingSelects(); }
+  else document.getElementById('pw_err').textContent =
+    r&&r.error==='admin not set' ? 'The admin password has not been set in the Apps Script yet.' :
+    r&&r.error==='unauthorized' ? 'Wrong password.' :
+    r&&r.error==='unknown action' ? 'The Apps Script is out of date — paste the new Code-Rawan.gs and redeploy.' : 'Could not check the password. Try again.';
+}
+function adminLogout(){
+  adminKey=''; isAdmin=false; try{sessionStorage.removeItem('rcw_admin');}catch(e){}
+  trainings=trainings.filter(isVis); renderTrainings(); fillTrainingSelects(); saveCache(); refreshAll(true);
+}
+function openTrainingForm(id){
+  const t=id? trainings.find(x=>String(x.id)===String(id)) : null;
+  document.getElementById('tdFormTitle').textContent = t? 'Edit training' : 'Add training';
+  document.getElementById('tf_id').value = t? t.id : '';
+  const set=(k,v)=>document.getElementById('tf_'+k).value = v==null?'':v;
+  set('title',t&&t.title); set('mode',t&&t.mode); set('duration',t&&t.duration); set('dates',t&&t.dates);
+  set('trainer',t&&t.trainer); set('location',t&&t.location); set('total',t&&t.total);
+  document.getElementById('tf_visible').checked = t? isVis(t) : true;
+  document.getElementById('tf_err').textContent='';
+  document.getElementById('tdModal').classList.remove('hidden');
+}
+function closeTrainingForm(){ document.getElementById('tdModal').classList.add('hidden'); }
+function adminLostMsg(){ alert('Your admin session has ended. Please log in again.'); adminLogout(); closeTrainingForm(); }
+async function saveTraining(){
+  const btn=document.getElementById('tfSave'); if(btn.disabled) return;
+  const v=k=>document.getElementById('tf_'+k).value.trim();
+  if(!v('title')){ document.getElementById('tf_err').textContent='Enter the training title.'; return; }
+  const id=v('id');
+  const rec={title:v('title'),mode:v('mode'),duration:v('duration'),dates:document.getElementById('tf_dates').value.trim(),trainer:v('trainer'),location:v('location'),total:v('total'),visible:document.getElementById('tf_visible').checked};
+  btn.disabled=true; const old=btn.textContent; btn.textContent='Saving…';
+  let res;
+  if(id){ res=await apiUpdate('trainings',id,rec); }
+  else { rec.ts=Date.now(); res=await apiAdd('trainings',rec); }
+  btn.disabled=false; btn.textContent=old;
+  if(res&&res.error==='unauthorized'){ adminLostMsg(); return; }
+  if(res&&(id? res.ok!==false : res.ok)){
+    if(id){ const cur=trainings.find(x=>String(x.id)===String(id)); if(cur) Object.assign(cur,rec); }
+    else trainings.push(Object.assign({id:res.id},rec));
+    closeTrainingForm(); renderTrainings(); fillTrainingSelects(); saveCache();
+  } else document.getElementById('tf_err').textContent='Could not save — check your internet connection and try again.';
+}
+async function toggleTraining(id){
+  const t=trainings.find(x=>String(x.id)===String(id)); if(!t) return;
+  const next=!isVis(t); t.visible=next; renderTrainings();
+  const res=await apiUpdate('trainings',id,{visible:next});
+  if(res&&res.error==='unauthorized'){ adminLostMsg(); return; }
+  if(!(res&&res.ok!==false)){ t.visible=!next; renderTrainings(); alert('Could not change this — try again.'); }
+  saveCache();
+}
+async function deleteTraining(id){
+  const t=trainings.find(x=>String(x.id)===String(id)); if(!t) return;
+  if(!confirm('Delete the training “'+t.title+'”?\n\nParticipants and assessments already saved for it are NOT deleted.')) return;
+  await apiDelete('trainings',id);
+  trainings=trainings.filter(x=>String(x.id)!==String(id)); renderTrainings(); fillTrainingSelects(); saveCache();
+}
+function fillTrainingSelects(){
+  const list=trainingsSorted();
+  ['np_training','up_training'].forEach(id=>{
+    const el=document.getElementById(id); if(!el) return; const cur=el.value;
+    el.innerHTML = list.length ? list.map(t=>`<option value="${esc(t.id)}">${esc(t.title)}${isAdmin&&!isVis(t)?' (hidden)':''}</option>`).join('') : '<option value="">(no training added yet)</option>';
+    if(cur && list.some(t=>String(t.id)===String(cur))) el.value=cur;
+  });
+}
+function trainingFields(t){ return t? {title:t.title||'',mode:t.mode||'',duration:t.duration||'',trainer:t.trainer||'',location:t.location||''} : {title:'',mode:'',duration:'',trainer:'',location:''}; }
+
+// ===== Excel upload: participants + pre/post scores =====
+function normKey(k){ return (k||'').toString().replace(/\s+/g,'').toLowerCase(); }
+function pick(row,names){ const nn=names.map(normKey); for(const k in row){ if(nn.includes(normKey(k))) return row[k]; } return ''; }
+function pickFuzzy(row,contains){ for(const k in row){ const nk=normKey(k); if(contains.some(c=>nk.indexOf(c)>-1)) return row[k]; } return ''; }
+// a score column: prefer "Pre-Test Score" over "Pre-Test %" when both exist
+function pickScoreCol(row,exact,parts){
+  const v=pick(row,exact); if(v!=='') return v;
+  let best=null;
+  for(const k in row){ const nk=normKey(k); if(!parts.some(x=>nk.indexOf(x)>-1)) continue; const pct=/%|percent|pct/.test(nk); if(!best||(best.pct&&!pct)) best={k,pct}; }
+  return best? row[best.k] : '';
+}
+function findHeaderRow(ws){
+  const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',blankrows:false});
+  for(let i=0;i<Math.min(10,raw.length);i++){ if(raw[i].map(normKey).some(v=>v.indexOf('name')>-1)) return i; }
+  return 0;
+}
+function parseScore10(raw){
+  if(raw===''||raw==null) return '';
+  const t=String(raw).trim(); if(!t) return '';
+  let n;
+  if(t.indexOf('/')>-1){ const [a,b]=t.split('/').map(parseFloat); if(!isNaN(a)&&b>0) n=a/b*10; }
+  else if(t.endsWith('%')) n=parseFloat(t)/10;
+  else { n=parseFloat(t); if(n>10&&n<=100) n=n/10; }
+  if(n===undefined||isNaN(n)) return '';
+  return Math.max(0,Math.min(10,Math.round(n*10)/10));
+}
+function downloadTemplate(){
+  if(typeof XLSX==='undefined'){ alert('The Excel library did not load. Check your internet connection and reload.'); return; }
+  const rows=[['Name','ID No.','Category','Department','IUs / GUs','Contractor','Batch','Pre-Test Score (/10)','Post-Test Score (/10)'],['Example Name','W001','Welder','Mechanical','Unit 1','ABC Contractors','Batch I',4,8]];
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Participants'); XLSX.writeFile(wb,'participants-template.xlsx');
+}
+async function uploadParticipants(){
+  const btn=document.getElementById('uploadBtn'); if(btn.disabled) return;
+  const msg=document.getElementById('upMsg'); msg.textContent='';
+  const f=document.getElementById('upFile').files[0];
+  if(!f){ alert('Choose an Excel file first.'); return; }
+  if(typeof XLSX==='undefined'){ alert('The Excel reader did not load. Check your internet connection and reload the page.'); return; }
+  const selT=trainings.find(x=>String(x.id)===document.getElementById('up_training').value);
+  const oldText=btn.textContent; btn.disabled=true; btn.classList.add('progress'); btn.style.setProperty('--p','0%'); btn.textContent='Reading file…';
+  syncPaused++;
+  const norm=x=>String(x==null?'':x).trim().toLowerCase();
+  let added=0, updated=0, skipped=0, failed=0, doneCount=0, total=0;
+  try{
+    const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});
+    let rows=[]; wb.SheetNames.forEach(sn=>{ const ws=wb.Sheets[sn]; rows=rows.concat(XLSX.utils.sheet_to_json(ws,{range:findHeaderRow(ws),defval:''})); });
+    const nameOf=row=>String(pick(row,['employee / cwm name','name','employee name','full name','participant name','cwm name'])||pickFuzzy(row,['name'])).trim();
+    const recs=[]; let noName=0;
+    rows.forEach(row=>{
+      const pname=nameOf(row); if(!pname){ noName++; return; }
+      const rowTitle=String(pick(row,['training','training title','training topic','title','programme','program'])||'').trim();
+      const cat=rowTitle? trainings.find(t=>norm(t.title)===norm(rowTitle)) : selT;
+      const base=trainingFields(cat); if(rowTitle&&!cat) base.title=rowTitle;
+      recs.push(Object.assign(base,{
+        batch:String(pick(row,['batch','batch no','batch no.'])||'').trim(),
+        pname, pid:String(pick(row,['id no.','id no','id','employee id','emp id'])||pickFuzzy(row,['idno','empid','employeeid'])||'').trim(),
+        category:String(pick(row,['category'])||pickFuzzy(row,['category'])||'').trim(),
+        department:String(pick(row,['department'])||pickFuzzy(row,['dept','department'])||'').trim(),
+        ius:String(pick(row,['ius / gus','ius/gus','ius','unit','gus'])||pickFuzzy(row,['unit','ius','gus'])||'').trim(),
+        contractor:String(pick(row,['contractor for cwm','contractor'])||pickFuzzy(row,['contractor','contactor'])||'').trim(),
+        preScore:parseScore10(pickScoreCol(row,['pre','pre-test','pretest','pre test'],['pretest','pre-test','pre_test','prescore'])),
+        postScore:parseScore10(pickScoreCol(row,['post','post-test','posttest','post test'],['posttest','post-test','post_test','postscore'])),
+        ts:Date.now()
+      }));
+    });
+    if(!recs.length){
+      const heads=rows[0]? Object.keys(rows[0]).filter(Boolean).join(', ') : '';
+      msg.textContent='No participants found. A “Name” column is needed.'+(heads? ' Columns found: '+heads : ''); return;
+    }
+    // decide: new person or someone already in the list (same ID No., or same name when there is no ID)
+    const byPid=new Map(), byName=new Map();
+    participants.forEach(pp=>{ const k=norm(pp.pid); if(k) byPid.set(k,pp); else byName.set(norm(pp.pname)+'|'+norm(pp.title),pp); });
+    const adds=new Map(), ups=new Map(); let dupInFile=0;
+    const keep=o=>{ const out={}; ['preScore','postScore','category','department','ius','contractor','batch'].forEach(k=>{ if(o[k]!==''&&o[k]!=null) out[k]=o[k]; }); return out; };
+    recs.forEach(r=>{
+      const k=norm(r.pid)? 'p:'+norm(r.pid) : 'n:'+norm(r.pname)+'|'+norm(r.title);
+      const ex=norm(r.pid)? byPid.get(norm(r.pid)) : byName.get(norm(r.pname)+'|'+norm(r.title));
+      if(ex){ if(ups.has(ex.id)){ dupInFile++; Object.assign(ups.get(ex.id).data,keep(r)); } else ups.set(ex.id,{id:ex.id,data:keep(r)}); }
+      else if(adds.has(k)){ dupInFile++; Object.assign(adds.get(k),Object.fromEntries(Object.entries(r).filter(([kk,vv])=>vv!==''&&vv!=null))); }
+      else adds.set(k,r);
+    });
+    const addList=[...adds.values()], upList=[...ups.values()]; total=addList.length+upList.length;
+    const progress=n=>{ doneCount+=n; const pc=total? doneCount/total*100:100; btn.style.setProperty('--p',pc.toFixed(1)+'%'); btn.textContent='Uploading '+doneCount+' / '+total+' ('+Math.round(pc)+'%)'; };
+    progress(0);
+    const chunk=(arr,n)=>{ const o=[]; for(let i=0;i<arr.length;i+=n) o.push(arr.slice(i,i+n)); return o; };
+    let batchAdd=true, batchUp=true;
+    await runPool(chunk(addList,25), async part=>{
+      const res=batchAdd? await apiAddMany('participants',part) : {ok:false,unsupported:true};
+      if(res.ok){ res.ids.forEach((id,i)=>{ if(id){ participants.push(Object.assign({id},part[i])); added++; } else skipped++; }); progress(part.length); return; }
+      if(res.unsupported){ batchAdd=false;
+        await runPool(part, async rec=>{ const r1=await apiAdd('participants',rec); if(r1&&r1.ok){ participants.push(Object.assign({id:r1.id},rec)); added++; } else if(r1&&r1.error==='duplicate') skipped++; else failed++; progress(1); }, 8);
+        return; }
+      failed+=part.length; progress(part.length);
+    }, 3);
+    await runPool(chunk(upList,25), async part=>{
+      const res=batchUp? await apiUpdateMany('participants',part) : {ok:false,unsupported:true};
+      if(res.ok){ const gone=new Set((res.missing||[]).map(String));
+        part.forEach(it=>{ if(gone.has(String(it.id))){ skipped++; return; } const cur=participants.find(x=>String(x.id)===String(it.id)); if(cur) Object.assign(cur,it.data); updated++; }); progress(part.length); return; }
+      if(res.unsupported){ batchUp=false;
+        await runPool(part, async it=>{ const r1=await apiUpdate('participants',it.id,it.data); if(r1&&r1.ok!==false){ const cur=participants.find(x=>String(x.id)===String(it.id)); if(cur) Object.assign(cur,it.data); updated++; } else failed++; progress(1); }, 8);
+        return; }
+      failed+=part.length; progress(part.length);
+    }, 3);
+    fillAssessSel(); fillProfileSel(); renderDash(); saveCache();
+    msg.textContent='Done — '+added+' added, '+updated+' updated'+(skipped||dupInFile? ', '+(skipped+dupInFile)+' skipped as duplicates':'')+(noName? ', '+noName+' row(s) without a name ignored':'')+(failed? ', '+failed+' FAILED (upload the file again — people already saved are updated, not duplicated)':'')+'. Select a participant above to see the scores.';
+    document.getElementById('upFile').value='';
+  } catch(e){ console.error(e); msg.textContent='Could not read this file. Please use an .xlsx file (the template button gives the right layout).'; }
+  finally{ syncPaused--; btn.disabled=false; btn.textContent=oldText; btn.classList.remove('progress'); btn.style.removeProperty('--p'); setTimeout(()=>refreshAll(true),500); }
+}
+
 async function addParticipant(){
   const btn=document.getElementById('addParticipantBtn'); if(btn.disabled) return;
   const v=id=>document.getElementById(id).value.trim();
   const name=v('np_name'); if(!name){ alert('Enter the participant name.'); return; }
   const pidv=v('np_pid');
   if(pidv && participants.some(p=>String(p.pid||'').trim().toLowerCase()===pidv.toLowerCase())){ alert('A participant with this ID No. is already added.'); return; }
-  const batch=v('np_batch'), b=TRAINING.batches[batch];
+  const t=trainings.find(x=>String(x.id)===v('np_training'));
+  if(trainings.length && !t){ alert('Choose the training.'); return; }
   btn.disabled=true; const oldText=btn.textContent; btn.textContent='Saving…';
-  const rec={title:TRAINING.title,mode:TRAINING.mode,fromDate:b.from,toDate:b.to,duration:TRAINING.duration,trainer:TRAINING.trainer,location:TRAINING.location,batch,
-    pname:name,pid:pidv,category:v('np_category'),department:v('np_department'),ius:v('np_ius'),contractor:v('np_contractor'),ts:Date.now()};
+  const rec=Object.assign(trainingFields(t),{batch:v('np_batch'),
+    pname:name,pid:pidv,category:v('np_category'),department:v('np_department'),ius:v('np_ius'),contractor:v('np_contractor'),ts:Date.now()});
   const res=await apiAdd('participants',rec);
   if(res&&res.ok){
     participants.push(Object.assign({id:res.id},rec));
-    ['np_name','np_pid','np_category','np_department','np_ius','np_contractor'].forEach(id=>document.getElementById(id).value='');
+    ['np_name','np_pid','np_category','np_department','np_ius','np_contractor','np_batch'].forEach(id=>document.getElementById(id).value='');
     const sb=document.getElementById('assessSearch'); if(sb) sb.value='';
     fillAssessSel(); fillProfileSel(); renderDash();
     document.getElementById('assessPart').value=res.id; loadParticipant();   // ready to assess straight away
@@ -423,13 +691,14 @@ function filterAssessSel(typed){
   const sel=document.getElementById('assessPart'); const cur=sel.value;
   const box=document.getElementById('assessSearch');
   const q=(box?box.value:'').trim().toLowerCase();
-  const match=p=>!q||[p.pname,p.pid,p.department,p.batch,p.category,p.ius].some(v=>String(v||'').toLowerCase().includes(q));
+  const match=p=>!q||[p.pname,p.pid,p.department,p.batch,p.category,p.ius,p.title].some(v=>String(v||'').toLowerCase().includes(q));
   const list=participants.filter(p=>match(p)||String(p.id)===String(cur));
-  sel.innerHTML = '<option value="">-- select --</option>'+list.map(p=>`<option value="${esc(p.id)}">${esc(p.pname)}${p.pid?' ['+esc(p.pid)+']':''}${p.ius?' — '+esc(p.ius):''}${p.batch?' ('+esc(p.batch)+')':''}</option>`).join('');
+  const multi=new Set(participants.map(p=>p.title).filter(Boolean)).size>1;
+  sel.innerHTML = '<option value="">-- select --</option>'+list.map(p=>`<option value="${esc(p.id)}">${esc(p.pname)}${p.pid?' ['+esc(p.pid)+']':''}${p.ius?' — '+esc(p.ius):''}${p.batch?' ('+esc(p.batch)+')':''}${multi&&p.title?' · '+esc(p.title):''}</option>`).join('');
   if(cur&&list.some(p=>String(p.id)===String(cur))) sel.value=cur;
   const n=participants.filter(match).length;
   const cnt=document.getElementById('assessCount');
-  if(cnt) cnt.textContent=q? (n? n+' match'+(n>1?'es':'')+' found' : 'No participants found') : (participants.length? participants.length+' participant(s) in the list' : 'No participants yet — add them below.');
+  if(cnt) cnt.textContent=q? (n? n+' match'+(n>1?'es':'')+' found' : 'No participants found') : (participants.length? participants.length+' participant(s) in the list' : 'No participants yet — upload an Excel file or add them below.');
   if(typed&&q&&n===1){ const only=participants.find(match); if(String(sel.value)!==String(only.id)){ sel.value=only.id; loadParticipant(); } }
 }
 let currentLive=null, formPrefilled=false;
@@ -438,10 +707,11 @@ function clearScoreFields(){
   document.getElementById('pre').value=''; document.getElementById('post').value='';
   ENABLERS.forEach((_,i)=>document.getElementById('r'+i).selectedIndex=0);
 }
+function hasNum(v){ return v!==''&&v!==null&&v!==undefined&&!isNaN(v); }
 function loadParticipant(){
   const id=document.getElementById('assessPart').value;
   const p=participants.find(x=>String(x.id)===String(id));
-  let info=p? `Unit: ${p.ius||'-'} | Dept: ${p.department||'-'} | Category: ${p.category||'-'} | ${p.batch||''}` : '';
+  let info=p? [p.title?'Training: '+p.title:'', `Unit: ${p.ius||'-'}`, `Dept: ${p.department||'-'}`, `Category: ${p.category||'-'}`, p.batch||''].filter(Boolean).join(' | ') : '';
   // A participant is assessed once: if a record already exists, open it for update instead of creating a duplicate.
   currentLive = id ? (assessments.find(a=>String(a.participantId)===String(id))||null) : null;
   if(currentLive){
@@ -451,6 +721,12 @@ function loadParticipant(){
     if(currentLive.assessedBy) document.getElementById('assessedBy').value=currentLive.assessedBy;
     formPrefilled=true;
     info+=' | Already assessed'+(currentLive.assessedBy?' by '+currentLive.assessedBy:'')+' — saving will update that record';
+  } else if(p && (hasNum(p.preScore)||hasNum(p.postScore))){
+    clearScoreFields();
+    if(hasNum(p.preScore)) document.getElementById('pre').value=p.preScore;
+    if(hasNum(p.postScore)) document.getElementById('post').value=p.postScore;
+    formPrefilled=true;
+    info+=' | Pre/post scores loaded from the uploaded Excel — add the ratings and submit';
   } else if(formPrefilled){ clearScoreFields(); formPrefilled=false; }
   document.getElementById('partInfo').textContent=info; recalc(); setAssessBtn();
 }
