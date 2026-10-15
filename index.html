@@ -34,6 +34,7 @@ legend{font-weight:600;font-size:.82rem;padding:0 6px;}
 .btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:.85rem;cursor:pointer;margin-top:10px;margin-right:6px;}
 .btn.sec{background:var(--muted);}
 .btn:disabled{cursor:progress;opacity:1;}
+#delPartBtn:disabled,#bdBtn:disabled{cursor:not-allowed;opacity:.45;}
 .btn.progress{background:linear-gradient(90deg,var(--accent2) var(--p,0%),var(--accent) var(--p,0%));}
 .btn.danger{background:var(--bad);padding:4px 9px;font-size:.72rem;margin:0;}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px;}
@@ -175,11 +176,13 @@ details.addPart>summary{cursor:pointer;font-size:.8rem;color:var(--accent);font-
       <select id="assessPart" onchange="loadParticipant()" style="margin-top:6px;"></select>
       <div class="def" id="assessCount" style="margin-top:4px;"></div>
       <div class="def" id="partInfo"></div>
+      <button class="btn danger" type="button" id="delPartBtn" onclick="deleteSelectedParticipant()" style="margin-top:6px;padding:6px 12px;font-size:.78rem;" disabled>Delete this participant</button>
       <div class="addPart" id="uploadBox">
         <div class="addTitle">Upload Excel — participants with pre-test / post-test scores</div>
         <div class="def">Reads these columns: Name, ID No., Category, Department, IUs / GUs, Contractor, Batch, Pre-Test, Post-Test (scores out of 10; a value above 10 is read as a percentage). A title/banner row above the headings is skipped. The people appear in the list above and the scores fill the pre-test / post-test boxes when you select them. Someone already in the list (same ID No.) gets updated, not added twice.</div>
-        <div class="grid"><div><label>Training for this upload</label><select id="up_training"></select></div></div>
-        <input type="file" id="upFile" accept=".xlsx,.xls,.csv" style="margin-top:8px;">
+        <div class="grid"><div><label>Training for this upload</label><select id="up_training" onchange="upTrainingChanged()"></select></div></div>
+        <input type="file" id="upFile" accept=".xlsx,.xls,.csv" style="margin-top:8px;" onchange="readUploadFile()">
+        <div id="upFilters"></div>
         <button class="btn" type="button" id="uploadBtn" onclick="uploadParticipants()">Upload &amp; Fetch</button>
         <button class="btn sec" type="button" onclick="downloadTemplate()">Download Excel template</button>
         <div class="def" id="upMsg" style="margin-top:6px;"></div>
@@ -197,6 +200,18 @@ details.addPart>summary{cursor:pointer;font-size:.8rem;color:var(--accent);font-
           <div><label>Batch</label><input id="np_batch" placeholder="e.g. Batch I"></div>
         </div>
         <button class="btn" type="button" id="addParticipantBtn" onclick="addParticipant()">Add Participant</button>
+      </details>
+      <details class="addPart" id="bulkDel">
+        <summary>Remove loaded participants (before assessment)</summary>
+        <div class="def">Removes participants who have <b>no assessment yet</b> — anyone already assessed is never removed here. Pick a filter to remove only part of the list (for example one training or one batch). Needs admin login.</div>
+        <div class="grid">
+          <div><label>Training</label><select id="bd_training" onchange="bulkDelInfo()"></select></div>
+          <div><label>Batch</label><select id="bd_batch" onchange="bulkDelInfo()"></select></div>
+          <div><label>Unit (IUs / GUs)</label><select id="bd_ius" onchange="bulkDelInfo()"></select></div>
+          <div><label>Department</label><select id="bd_dept" onchange="bulkDelInfo()"></select></div>
+        </div>
+        <div class="def" id="bdInfo" style="margin-top:6px;"></div>
+        <button class="btn danger" type="button" id="bdBtn" onclick="bulkDeleteParticipants()" style="padding:8px 14px;font-size:.82rem;margin-top:6px;">Remove these participants</button>
       </details>
     </fieldset>
     <fieldset>
@@ -437,8 +452,9 @@ async function apiTrainings(){
 }
 async function apiDelete(type,id){
   localDeletes.set(type+':'+id,Date.now());
-  await postJSON({type,action:'delete',id},true);
-  scheduleSync();
+  const r=await postJSON({type,action:'delete',id},true);
+  if(!r||r.ok===false) localDeletes.delete(type+':'+id);   // failed: don't keep hiding a record that still exists
+  scheduleSync(); return r;
 }
 // Merge the server snapshot with this device's own very recent changes, so a slightly-stale snapshot never makes
 // a record you just saved vanish, reappear after delete, or revert.
@@ -582,43 +598,109 @@ function downloadTemplate(){
   const rows=[['Name','ID No.','Category','Department','IUs / GUs','Contractor','Batch','Pre-Test Score (/10)','Post-Test Score (/10)'],['Example Name','W001','Welder','Mechanical','Unit 1','ABC Contractors','Batch I',4,8]];
   const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Participants'); XLSX.writeFile(wb,'participants-template.xlsx');
 }
+// ---- Step 1: read the file and offer filters; Step 2 (button): upload only the rows that match ----
+const UP_FILTERS=[['sheet','Sheet'],['tr','Training'],['batch','Batch'],['ius','Unit (IUs / GUs)'],['department','Department'],['category','Category'],['contractor','Contractor']];
+let upState={recs:[],noName:0,heads:'',hasTrainingCol:false}, upSel={};
+const tkey=x=>String(x==null?'':x).toLowerCase().replace(/[^a-z0-9]/g,'');   // "Welder’s Upskilling" == "welders upskilling"
+function pickTraining(row){
+  const v=pick(row,['training','training title','training name','training topic','title','programme','program','course']); if(v!=='') return v;
+  for(const k in row){ const nk=normKey(k); if(/(training|programme|program|course)/.test(nk)&&!/(date|mode|trainer|duration|location|venue|score|test|batch|day|hour)/.test(nk)&&String(row[k]).trim()) return row[k]; }
+  return '';
+}
+function upSelectedTraining(){ return trainings.find(x=>String(x.id)===document.getElementById('up_training').value); }
+function upTitle(r){ if(r._rt){ const t=trainings.find(x=>tkey(x.title)===tkey(r._rt)); return t? t.title : r._rt; } const t=upSelectedTraining(); return t? t.title : ''; }
+function upVal(r,k){ return k==='sheet'? r._sheet : k==='tr'? upTitle(r) : String(r[k]||'').trim(); }
+function upMatch(r){
+  for(const f of UP_FILTERS){ const k=f[0], sel=upSel[k]; if(sel&&sel!=='__all__'&&(upVal(r,k)||'__blank__')!==sel) return false; }
+  const q=(upSel.q||'').trim().toLowerCase();
+  return !q || [r.pname,r.pid].some(v=>String(v||'').toLowerCase().includes(q));
+}
+function upMatchInfo(){
+  const el=document.getElementById('upMatchInfo'); if(!el) return;
+  const n=upState.recs.filter(upMatch).length;
+  el.innerHTML='<b>'+n+'</b> of '+upState.recs.length+' rows match — only these will be uploaded.';
+}
+function upSetFilter(k,v){ upSel[k]=v; upMatchInfo(); }
+function upDefaultTraining(){
+  // if the file lists several trainings, start with the one chosen in "Training for this upload"
+  const t=upSelectedTraining(); if(!t) return;
+  const hit=upState.recs.find(r=>r._rt&&tkey(r._rt)===tkey(t.title));
+  if(hit) upSel.tr=upTitle(hit);
+}
+function upTrainingChanged(){ if(!upState.recs.length) return; upDefaultTraining(); buildUpFilters(); }
+function buildUpFilters(){
+  const box=document.getElementById('upFilters'); const recs=upState.recs;
+  if(!recs.length){ box.innerHTML=''; return; }
+  let html='<div class="def" style="margin-top:10px;font-weight:600;">Filter before uploading</div><div class="grid">';
+  UP_FILTERS.forEach(f=>{
+    const k=f[0], label=f[1], cnt=new Map();
+    recs.forEach(r=>{ const v=upVal(r,k)||'__blank__'; cnt.set(v,(cnt.get(v)||0)+1); });
+    if(cnt.size<2){ delete upSel[k]; return; }          // nothing to choose between
+    const cur=upSel[k]||'__all__';
+    html+='<div><label>'+label+'</label><select onchange="upSetFilter(\''+k+'\',this.value)"><option value="__all__">All ('+recs.length+')</option>'
+      +[...cnt].sort((x,y)=>x[0].localeCompare(y[0])).map(([v,n])=>'<option value="'+esc(v)+'"'+(v===cur?' selected':'')+'>'+(v==='__blank__'?'(blank)':esc(v))+' ('+n+')</option>').join('')+'</select></div>';
+  });
+  html+='<div><label>Name / ID contains</label><input type="search" value="'+esc(upSel.q||'')+'" oninput="upSetFilter(\'q\',this.value)"></div></div><div class="def" id="upMatchInfo"></div>';
+  box.innerHTML=html; upMatchInfo();
+}
+async function readUploadFile(){
+  const msg=document.getElementById('upMsg'), f=document.getElementById('upFile').files[0];
+  upState={recs:[],noName:0,heads:'',hasTrainingCol:false}; upSel={}; buildUpFilters();
+  msg.textContent='';
+  if(!f) return;
+  if(typeof XLSX==='undefined'){ msg.textContent='The Excel reader did not load. Check your internet connection and reload the page.'; return; }
+  msg.textContent='Reading file…';
+  try{
+    const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});
+    const nameOf=row=>String(pick(row,['employee / cwm name','name','employee name','full name','participant name','cwm name'])||pickFuzzy(row,['name'])).trim();
+    wb.SheetNames.forEach(sn=>{
+      const ws=wb.Sheets[sn];
+      XLSX.utils.sheet_to_json(ws,{range:findHeaderRow(ws),defval:''}).forEach(row=>{
+        if(!upState.heads) upState.heads=Object.keys(row).filter(Boolean).join(', ');
+        const pname=nameOf(row); if(!pname){ upState.noName++; return; }
+        const rt=String(pickTraining(row)||'').trim(); if(rt) upState.hasTrainingCol=true;
+        upState.recs.push({
+          _sheet:sn, _rt:rt,
+          batch:String(pick(row,['batch','batch no','batch no.'])||'').trim(),
+          pname, pid:String(pick(row,['id no.','id no','id','employee id','emp id'])||pickFuzzy(row,['idno','empid','employeeid'])||'').trim(),
+          category:String(pick(row,['category'])||pickFuzzy(row,['category'])||'').trim(),
+          department:String(pick(row,['department'])||pickFuzzy(row,['dept','department'])||'').trim(),
+          ius:String(pick(row,['ius / gus','ius/gus','ius','unit','gus'])||pickFuzzy(row,['unit','ius','gus'])||'').trim(),
+          contractor:String(pick(row,['contractor for cwm','contractor'])||pickFuzzy(row,['contractor','contactor'])||'').trim(),
+          preScore:parseScore10(pickScoreCol(row,['pre','pre-test','pretest','pre test'],['pretest','pre-test','pre_test','prescore'])),
+          postScore:parseScore10(pickScoreCol(row,['post','post-test','posttest','post test'],['posttest','post-test','post_test','postscore']))
+        });
+      });
+    });
+    if(!upState.recs.length){ msg.textContent='No participants found. A “Name” column is needed.'+(upState.heads? ' Columns found: '+upState.heads : ''); return; }
+    upDefaultTraining(); buildUpFilters();
+    msg.textContent='File read — '+upState.recs.length+' participant row(s) in '+wb.SheetNames.length+' sheet(s). '
+      +(upState.hasTrainingCol? 'A Training column was found, so you can filter by training below.' : 'No Training column found — every row goes to the training chosen above. Use the filters to upload only some rows.')
+      +' Nothing is saved until you press “Upload & Fetch”.';
+  }catch(e){ console.error(e); msg.textContent='Could not read this file. Please use an .xlsx file (the template button gives the right layout).'; }
+}
 async function uploadParticipants(){
   const btn=document.getElementById('uploadBtn'); if(btn.disabled) return;
-  const msg=document.getElementById('upMsg'); msg.textContent='';
+  const msg=document.getElementById('upMsg');
   const f=document.getElementById('upFile').files[0];
   if(!f){ alert('Choose an Excel file first.'); return; }
   if(typeof XLSX==='undefined'){ alert('The Excel reader did not load. Check your internet connection and reload the page.'); return; }
-  const selT=trainings.find(x=>String(x.id)===document.getElementById('up_training').value);
-  const oldText=btn.textContent; btn.disabled=true; btn.classList.add('progress'); btn.style.setProperty('--p','0%'); btn.textContent='Reading file…';
+  if(!upState.recs.length){ await readUploadFile(); if(!upState.recs.length) return; }
+  const picked=upState.recs.filter(upMatch);
+  if(!picked.length){ msg.textContent='No rows match the current filters — change the filters above.'; return; }
+  const selT=upSelectedTraining();
+  const oldText=btn.textContent; btn.disabled=true; btn.classList.add('progress'); btn.style.setProperty('--p','0%'); btn.textContent='Preparing…';
   syncPaused++;
   const norm=x=>String(x==null?'':x).trim().toLowerCase();
   let added=0, updated=0, skipped=0, failed=0, doneCount=0, total=0;
   try{
-    const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});
-    let rows=[]; wb.SheetNames.forEach(sn=>{ const ws=wb.Sheets[sn]; rows=rows.concat(XLSX.utils.sheet_to_json(ws,{range:findHeaderRow(ws),defval:''})); });
-    const nameOf=row=>String(pick(row,['employee / cwm name','name','employee name','full name','participant name','cwm name'])||pickFuzzy(row,['name'])).trim();
-    const recs=[]; let noName=0;
-    rows.forEach(row=>{
-      const pname=nameOf(row); if(!pname){ noName++; return; }
-      const rowTitle=String(pick(row,['training','training title','training topic','title','programme','program'])||'').trim();
-      const cat=rowTitle? trainings.find(t=>norm(t.title)===norm(rowTitle)) : selT;
-      const base=trainingFields(cat); if(rowTitle&&!cat) base.title=rowTitle;
-      recs.push(Object.assign(base,{
-        batch:String(pick(row,['batch','batch no','batch no.'])||'').trim(),
-        pname, pid:String(pick(row,['id no.','id no','id','employee id','emp id'])||pickFuzzy(row,['idno','empid','employeeid'])||'').trim(),
-        category:String(pick(row,['category'])||pickFuzzy(row,['category'])||'').trim(),
-        department:String(pick(row,['department'])||pickFuzzy(row,['dept','department'])||'').trim(),
-        ius:String(pick(row,['ius / gus','ius/gus','ius','unit','gus'])||pickFuzzy(row,['unit','ius','gus'])||'').trim(),
-        contractor:String(pick(row,['contractor for cwm','contractor'])||pickFuzzy(row,['contractor','contactor'])||'').trim(),
-        preScore:parseScore10(pickScoreCol(row,['pre','pre-test','pretest','pre test'],['pretest','pre-test','pre_test','prescore'])),
-        postScore:parseScore10(pickScoreCol(row,['post','post-test','posttest','post test'],['posttest','post-test','post_test','postscore'])),
-        ts:Date.now()
-      }));
+    const noName=upState.noName;
+    const recs=picked.map(r=>{
+      const cat=r._rt? trainings.find(t=>tkey(t.title)===tkey(r._rt)) : selT;
+      const base=trainingFields(cat); if(r._rt&&!cat) base.title=r._rt;
+      const o=Object.assign({},r); delete o._rt; delete o._sheet;
+      return Object.assign(base,o,{ts:Date.now()});
     });
-    if(!recs.length){
-      const heads=rows[0]? Object.keys(rows[0]).filter(Boolean).join(', ') : '';
-      msg.textContent='No participants found. A “Name” column is needed.'+(heads? ' Columns found: '+heads : ''); return;
-    }
     // decide: new person or someone already in the list (same ID No., or same name when there is no ID)
     const byPid=new Map(), byName=new Map();
     participants.forEach(pp=>{ const k=norm(pp.pid); if(k) byPid.set(k,pp); else byName.set(norm(pp.pname)+'|'+norm(pp.title),pp); });
@@ -655,9 +737,81 @@ async function uploadParticipants(){
     }, 3);
     fillAssessSel(); fillProfileSel(); renderDash(); saveCache();
     msg.textContent='Done — '+added+' added, '+updated+' updated'+(skipped||dupInFile? ', '+(skipped+dupInFile)+' skipped as duplicates':'')+(noName? ', '+noName+' row(s) without a name ignored':'')+(failed? ', '+failed+' FAILED (upload the file again — people already saved are updated, not duplicated)':'')+'. Select a participant above to see the scores.';
-    document.getElementById('upFile').value='';
+    document.getElementById('upFile').value=''; upState={recs:[],noName:0,heads:'',hasTrainingCol:false}; upSel={}; buildUpFilters();
   } catch(e){ console.error(e); msg.textContent='Could not read this file. Please use an .xlsx file (the template button gives the right layout).'; }
   finally{ syncPaused--; btn.disabled=false; btn.textContent=oldText; btn.classList.remove('progress'); btn.style.removeProperty('--p'); setTimeout(()=>refreshAll(true),500); }
+}
+
+// ===== Delete participants (only while they have no assessment) =====
+const chunkArr=(arr,n)=>{ const o=[]; for(let i=0;i<arr.length;i+=n) o.push(arr.slice(i,i+n)); return o; };
+function hasAssessment(pid){ return assessments.some(a=>String(a.participantId)===String(pid)); }
+function updateDelBtn(){
+  const b=document.getElementById('delPartBtn'); if(!b) return;
+  const id=document.getElementById('assessPart').value;
+  b.disabled=!id || hasAssessment(id);
+  b.title = !id? 'Select a participant first' : hasAssessment(id)? 'Already assessed — delete the assessment record in Total Records first' : '';
+}
+async function deleteSelectedParticipant(){
+  const id=document.getElementById('assessPart').value;
+  const p=participants.find(x=>String(x.id)===String(id));
+  if(!p){ alert('Select a participant first.'); return; }
+  if(hasAssessment(id)){ alert('This participant already has an assessment record. Delete that record in “Total Records” first.'); return; }
+  if(!confirm('Delete participant “'+p.pname+(p.pid?' ['+p.pid+']':'')+'” from the list?\n\nThis cannot be undone.')) return;
+  const r=await apiDelete('participants',id);
+  if(!r||r.ok===false){ alert('Could not delete — check the connection and try again.'); return; }
+  participants=participants.filter(x=>String(x.id)!==String(id));
+  document.getElementById('assessPart').value=''; loadParticipant(); fillAssessSel(); fillProfileSel(); renderDash(); saveCache();
+}
+function bdMatch(p){
+  return [['title','bd_training'],['batch','bd_batch'],['ius','bd_ius'],['department','bd_dept']].every(([k,id])=>{
+    const el=document.getElementById(id); const v=el? el.value : '__all__';
+    return !v||v==='__all__'||(String(p[k]||'').trim()||'__blank__')===v;
+  });
+}
+function bdCandidates(){ const done=new Set(assessments.map(a=>String(a.participantId))); return participants.filter(p=>!done.has(String(p.id))&&bdMatch(p)); }
+function bulkDelFill(){
+  if(!document.getElementById('bd_training')) return;
+  const done=new Set(assessments.map(a=>String(a.participantId)));
+  const pool=participants.filter(p=>!done.has(String(p.id)));
+  [['bd_training','title'],['bd_batch','batch'],['bd_ius','ius'],['bd_dept','department']].forEach(([id,k])=>{
+    const sel=document.getElementById(id), cur=sel.value||'__all__', cnt=new Map();
+    pool.forEach(p=>{ const v=String(p[k]||'').trim()||'__blank__'; cnt.set(v,(cnt.get(v)||0)+1); });
+    sel.innerHTML='<option value="__all__">All ('+pool.length+')</option>'+[...cnt].sort((x,y)=>x[0].localeCompare(y[0])).map(([v,n])=>'<option value="'+esc(v)+'">'+(v==='__blank__'?'(blank)':esc(v))+' ('+n+')</option>').join('');
+    sel.value=(cnt.has(cur)||cur==='__all__')? cur : '__all__';
+  });
+  bulkDelInfo();
+}
+function bulkDelInfo(){
+  const el=document.getElementById('bdInfo'); if(!el) return;
+  const n=bdCandidates().length, kept=participants.filter(p=>hasAssessment(p.id)).length;
+  el.textContent=n+' participant(s) will be removed'+(kept? ' · '+kept+' already assessed (kept)' : '')+'.';
+  const b=document.getElementById('bdBtn'); if(b) b.disabled=!n;
+}
+async function bulkDeleteParticipants(){
+  if(!isAdmin||!adminKey){ alert('Admin login is needed to remove many participants at once. Enter the admin password in the box that opens.'); adminLogin(); return; }
+  const list=bdCandidates(); if(!list.length){ alert('No participants match.'); return; }
+  if(!confirm('Remove '+list.length+' participant(s) who have no assessment yet?\n\nThis cannot be undone.')) return;
+  const btn=document.getElementById('bdBtn'), old=btn.textContent; btn.disabled=true; syncPaused++;
+  const gone=new Set(); let failed=0, denied=false, single=false;
+  try{
+    const ids=list.map(p=>p.id), parts=chunkArr(ids,100); let done=0;
+    for(const part of parts){
+      btn.textContent='Removing '+done+' / '+ids.length+'…';
+      if(!single){
+        const res=await postJSON({type:'participants',action:'deleteMany',ids:part,key:adminKey},true);
+        if(res&&res.ok){ const now=Date.now(); part.forEach(id=>{ gone.add(String(id)); localDeletes.set('participants:'+id,now); }); done+=part.length; continue; }
+        if(res&&res.error==='unauthorized'){ denied=true; adminKey=''; isAdmin=false; try{sessionStorage.removeItem('rcw_admin');}catch(e){} break; }
+        if(res&&res.error==='unknown action') single=true;       // older script: delete one by one instead
+        else { failed+=part.length; continue; }
+      }
+      await runPool(part, async id=>{ const r=await apiDelete('participants',id); if(r&&r.ok!==false) gone.add(String(id)); else failed++; done++; btn.textContent='Removing '+done+' / '+ids.length+'…'; }, 5);
+    }
+  } finally {
+    participants=participants.filter(p=>!gone.has(String(p.id)));
+    syncPaused--; btn.textContent=old;
+    document.getElementById('assessPart').value=''; loadParticipant(); fillAssessSel(); fillProfileSel(); renderDash(); saveCache(); scheduleSync();
+  }
+  alert(denied? 'The admin password was not accepted. Nothing more was removed.' : gone.size+' participant(s) removed'+(failed? ', '+failed+' could not be removed — try again.' : '.'));
 }
 
 async function addParticipant(){
@@ -686,7 +840,7 @@ async function addParticipant(){
   saveCache();
 }
 
-function fillAssessSel(){ filterAssessSel(false); }
+function fillAssessSel(){ filterAssessSel(false); bulkDelFill(); }
 function filterAssessSel(typed){
   const sel=document.getElementById('assessPart'); const cur=sel.value;
   const box=document.getElementById('assessSearch');
@@ -700,6 +854,7 @@ function filterAssessSel(typed){
   const cnt=document.getElementById('assessCount');
   if(cnt) cnt.textContent=q? (n? n+' match'+(n>1?'es':'')+' found' : 'No participants found') : (participants.length? participants.length+' participant(s) in the list' : 'No participants yet — upload an Excel file or add them below.');
   if(typed&&q&&n===1){ const only=participants.find(match); if(String(sel.value)!==String(only.id)){ sel.value=only.id; loadParticipant(); } }
+  updateDelBtn();
 }
 let currentLive=null, formPrefilled=false;
 function setAssessBtn(){ const b=document.getElementById('submitAssessBtn'); if(b&&!b.disabled) b.textContent = currentLive? 'Update Assessment' : 'Submit Assessment'; }
@@ -709,6 +864,7 @@ function clearScoreFields(){
 }
 function hasNum(v){ return v!==''&&v!==null&&v!==undefined&&!isNaN(v); }
 function loadParticipant(){
+  updateDelBtn();
   const id=document.getElementById('assessPart').value;
   const p=participants.find(x=>String(x.id)===String(id));
   let info=p? [p.title?'Training: '+p.title:'', `Unit: ${p.ius||'-'}`, `Dept: ${p.department||'-'}`, `Category: ${p.category||'-'}`, p.batch||''].filter(Boolean).join(' | ') : '';
