@@ -609,8 +609,12 @@ function downloadTemplate(){
 }
 // ---- Step 1: read the file and offer filters; Step 2 (button): upload only the rows that match ----
 const UP_FILTERS=[['sheet','Sheet'],['tr','Training'],['batch','Batch'],['ius','Unit (IUs / GUs)'],['department','Department'],['category','Category'],['contractor','Contractor']];
-let upState={recs:[],noName:0,heads:'',hasTrainingCol:false}, upSel={};
-const tkey=x=>String(x==null?'':x).toLowerCase().replace(/[^a-z0-9]/g,'');   // "Welder’s Upskilling" == "welders upskilling"
+let upState={recs:[],noName:0,heads:'',hasTrainingCol:false,cols:{}}, upSel={};
+function tkey(x){   // "Welder’s Upskilling Training" == "Welder Upskilling Training Program"
+  return String(x==null?'':x).toLowerCase().replace(/[^a-z0-9]+/g,' ').split(' ')
+    .filter(w=>w.length>1&&['training','program','programme','course'].indexOf(w)<0)
+    .map(w=>w.length>3&&w.charAt(w.length-1)==='s'? w.slice(0,-1) : w).sort().join(' ');
+}
 function pickTraining(row){
   const v=pick(row,['training','training title','training name','training topic','title','programme','program','course']); if(v!=='') return v;
   for(const k in row){ const nk=normKey(k); if(/(training|programme|program|course)/.test(nk)&&!/(date|mode|trainer|duration|location|venue|score|test|batch|day|hour)/.test(nk)&&String(row[k]).trim()) return row[k]; }
@@ -652,9 +656,30 @@ function buildUpFilters(){
   html+='<div><label>Name / ID contains</label><input type="search" value="'+esc(upSel.q||'')+'" oninput="upSetFilter(\'q\',this.value)"></div></div><div class="def" id="upMatchInfo"></div>';
   box.innerHTML=html; upMatchInfo();
 }
+function cleanId(v){ const t=String(v==null?'':v).trim(); return /^(-|–|—|na|n\/a|nil|none|0)$/i.test(t)? '' : t; }
+
+// ---- pre / post score columns: any heading that says "pre" or "post" (Pre-Test, Post Screening, Post Test Score, Pre %, …) ----
+const SCORE_RX={pre:/(^|[^a-z])pre([^a-z]|$)|pre[\s_.-]*(test|score|screen|assess|training|mark)/i, post:/(^|[^a-z])po?a?st([^a-z]|$)|po?a?st[\s_.-]*(test|score|screen|assess|training|mark)/i};   // also catches typos such as "Poast"
+function scoreOf(row,which){
+  let best=null;
+  for(const k in row){
+    const h=String(k||''); if(!SCORE_RX[which].test(h)) continue;
+    if(which==='pre'&&SCORE_RX.post.test(h)) continue;
+    const pct=/%|percent|pct/i.test(h), val=row[k];
+    if(!best||(best.pct&&!pct)||(best.val===''&&val!=='')) best={k:h,pct,val};
+  }
+  if(!best) return '';
+  if(!upState.cols[which]) upState.cols[which]=best.k;
+  let v=best.val;
+  if(best.pct&&typeof v==='number'&&v>0&&v<=1) v=(v*100)+'%';          // Excel stores 85% as 0.85
+  const sc=parseScore10(v);
+  if(sc!=='') upState.cols[which+'N']=(upState.cols[which+'N']||0)+1;
+  return sc;
+}
+
 async function readUploadFile(){
   const msg=document.getElementById('upMsg'), f=document.getElementById('upFile').files[0];
-  upState={recs:[],noName:0,heads:'',hasTrainingCol:false}; upSel={}; buildUpFilters();
+  upState={recs:[],noName:0,heads:'',hasTrainingCol:false,cols:{}}; upSel={}; buildUpFilters();
   msg.textContent='';
   if(!f) return;
   if(typeof XLSX==='undefined'){ msg.textContent='The Excel reader did not load. Check your internet connection and reload the page.'; return; }
@@ -664,33 +689,41 @@ async function readUploadFile(){
     const nameOf=row=>String(pick(row,['employee / cwm name','name','employee name','full name','participant name','cwm name'])||pickFuzzy(row,['name'])).trim();
     wb.SheetNames.forEach(sn=>{
       const ws=wb.Sheets[sn];
+      let carry={topic:null};   // values written once at the top of a training block are carried down to the rest of the block
       XLSX.utils.sheet_to_json(ws,{range:findHeaderRow(ws),defval:''}).forEach(row=>{
         if(!upState.heads) upState.heads=Object.keys(row).filter(Boolean).join(', ');
         const pname=nameOf(row); if(!pname){ upState.noName++; return; }
         const rt=String(pickTraining(row)||'').trim(); if(rt) upState.hasTrainingCol=true;
+        if(carry.topic!==rt) carry={topic:rt};
+        const blk=(k,v)=>{ if(v!==''&&v!=null){ carry[k]=v; return v; } return carry[k]||''; };
         upState.recs.push({
           _sheet:sn, _rt:rt,
           batch:String(pick(row,['batch','batch no','batch no.'])||'').trim(),
-          pname, pid:String(pick(row,['id no.','id no','id','employee id','emp id'])||pickFuzzy(row,['idno','empid','employeeid'])||'').trim(),
+          pname, pid:cleanId(pick(row,['id no.','id no','id','employee id','emp id','poornata id','cwm id','cwm id no','employee code','emp code'])||pickFuzzy(row,['idno','empid','employeeid','poornata','cwmid'])),
           category:String(pick(row,['category'])||pickFuzzy(row,['category'])||'').trim(),
           department:String(pick(row,['department'])||pickFuzzy(row,['dept','department'])||'').trim(),
           ius:String(pick(row,['ius / gus','ius/gus','ius','unit','gus'])||pickFuzzy(row,['unit','ius','gus'])||'').trim(),
           gender:String(pick(row,['gender','sex'])||'').trim(),
-          competency:String(pick(row,['competency','competencies','competence'])||'').trim(),
-          fromDate:parseDateCell(pick(row,['from date','fromdate','from','start date','training from'])),
-          toDate:parseDateCell(pick(row,['to date','todate','to','end date','training to'])),
-          location:String(pick(row,['venue','location'])||'').trim(),
+          competency:blk('competency',String(pick(row,['competency','competencies','competence'])||'').trim()),
+          fromDate:blk('fromDate',parseDateCell(pick(row,['from date','fromdate','from','start date','training from']))),
+          toDate:blk('toDate',parseDateCell(pick(row,['to date','todate','to','end date','training to']))),
+          location:blk('location',String(pick(row,['venue','location'])||'').trim()),
+          trainer:carry.trainer||blk('trainer',String(pick(row,['trainer','trainer name','trainers'])||'').trim().replace(/^remarks?\b.*$/i,'')),   // the name at the top of the block wins; later cells (remarks etc.) are ignored
           contractor:String(pick(row,['contractor for cwm','contractor'])||pickFuzzy(row,['contractor','contactor'])||'').trim(),
-          preScore:parseScore10(pickScoreCol(row,['pre','pre-test','pretest','pre test'],['pretest','pre-test','pre_test','prescore'])),
-          postScore:parseScore10(pickScoreCol(row,['post','post-test','posttest','post test'],['posttest','post-test','post_test','postscore']))
+          preScore:scoreOf(row,'pre'),
+          postScore:scoreOf(row,'post')
         });
       });
     });
     if(!upState.recs.length){ msg.textContent='No participants found. A “Name” column is needed.'+(upState.heads? ' Columns found: '+upState.heads : ''); return; }
     upDefaultTraining(); buildUpFilters();
+    const c=upState.cols, ex=upState.recs.find(r=>r.preScore!==''&&r.postScore!=='');
+    const scoreNote=' Pre-test column: '+(c.pre? '“'+c.pre+'” ('+(c.preN||0)+' scores)' : 'NOT FOUND')+' · Post-test column: '+(c.post? '“'+c.post+'” ('+(c.postN||0)+' scores)' : 'NOT FOUND')
+      +(ex? ' · e.g. first row with both: Pre '+ex.preScore+' → Post '+ex.postScore+' (out of 10).' : '.')
+      +((!c.pre||!c.post)&&upState.heads? ' Columns in the file: '+upState.heads+'.' : '');
     msg.textContent='File read — '+upState.recs.length+' participant row(s) in '+wb.SheetNames.length+' sheet(s). '
       +(upState.hasTrainingCol? 'A Training column was found, so you can filter by training below.' : 'No Training column found — every row goes to the training chosen above. Use the filters to upload only some rows.')
-      +' Nothing is saved until you press “Upload & Fetch”.';
+      +scoreNote+' Nothing is saved until you press “Upload & Fetch”.';
   }catch(e){ console.error(e); msg.textContent='Could not read this file. Please use an .xlsx file (the template button gives the right layout).'; }
 }
 async function uploadParticipants(){
@@ -713,17 +746,16 @@ async function uploadParticipants(){
       const cat=r._rt? trainings.find(t=>tkey(t.title)===tkey(r._rt)) : selT;
       const base=trainingFields(cat); if(r._rt&&!cat) base.title=r._rt;
       const o=Object.assign({},r); delete o._rt; delete o._sheet;
-      ['gender','competency','fromDate','toDate','location'].forEach(k=>{ if(o[k]===''||o[k]==null) delete o[k]; });   // blank cell = keep the training's own value
+      ['gender','competency','fromDate','toDate','location','trainer'].forEach(k=>{ if(o[k]===''||o[k]==null) delete o[k]; });   // blank cell = keep the training's own value
       return Object.assign(base,o,{ts:Date.now()});
     });
     // decide: new person or someone already in the list (same ID No., or same name when there is no ID)
-    const byPid=new Map(), byName=new Map();
-    participants.forEach(pp=>{ const k=norm(pp.pid); if(k) byPid.set(k,pp); else byName.set(norm(pp.pname)+'|'+norm(pp.title),pp); });
+    const pk=r=>(norm(r.pid)? 'p:'+norm(r.pid) : 'n:'+norm(r.pname))+'|'+tkey(r.title);   // person + training
+    const byKey=new Map(); participants.forEach(pp=>byKey.set(pk(pp),pp));
     const adds=new Map(), ups=new Map(); let dupInFile=0;
-    const keep=o=>{ const out={}; ['preScore','postScore','category','department','ius','contractor','batch','gender','competency','fromDate','toDate','location'].forEach(k=>{ if(o[k]!==''&&o[k]!=null) out[k]=o[k]; }); return out; };
+    const keep=o=>{ const out={}; ['pid','preScore','postScore','category','department','ius','contractor','batch','gender','competency','fromDate','toDate','location','trainer'].forEach(k=>{ if(o[k]!==''&&o[k]!=null) out[k]=o[k]; }); return out; };
     recs.forEach(r=>{
-      const k=norm(r.pid)? 'p:'+norm(r.pid) : 'n:'+norm(r.pname)+'|'+norm(r.title);
-      const ex=norm(r.pid)? byPid.get(norm(r.pid)) : byName.get(norm(r.pname)+'|'+norm(r.title));
+      const k=pk(r), ex=byKey.get(k)||(norm(r.pid)? byKey.get('n:'+norm(r.pname)+'|'+tkey(r.title)) : null);   // an earlier upload without ID is matched by name and gets its ID now
       if(ex){ if(ups.has(ex.id)){ dupInFile++; Object.assign(ups.get(ex.id).data,keep(r)); } else ups.set(ex.id,{id:ex.id,data:keep(r)}); }
       else if(adds.has(k)){ dupInFile++; Object.assign(adds.get(k),Object.fromEntries(Object.entries(r).filter(([kk,vv])=>vv!==''&&vv!=null))); }
       else adds.set(k,r);
@@ -834,8 +866,8 @@ async function addParticipant(){
   const v=id=>document.getElementById(id).value.trim();
   const name=v('np_name'); if(!name){ alert('Enter the participant name.'); return; }
   const pidv=v('np_pid');
-  if(pidv && participants.some(p=>String(p.pid||'').trim().toLowerCase()===pidv.toLowerCase())){ alert('A participant with this ID No. is already added.'); return; }
   const t=trainings.find(x=>String(x.id)===v('np_training'));
+  if(pidv && participants.some(p=>String(p.pid||'').trim().toLowerCase()===pidv.toLowerCase()&&tkey(p.title)===tkey(t?t.title:''))){ alert('This ID No. is already added for this training.'); return; }
   if(trainings.length && !t){ alert('Choose the training.'); return; }
   btn.disabled=true; const oldText=btn.textContent; btn.textContent='Saving…';
   const rec=Object.assign(trainingFields(t),{batch:v('np_batch'),
@@ -896,7 +928,7 @@ function fmtDay(v){
   return t;
 }
 const aKey=x=>String(x||'').toLowerCase().replace(/[^a-z0-9]/g,'');
-function trainingOf(p){ return trainings.find(t=>aKey(t.title)===aKey(p.title))||null; }
+function trainingOf(p){ return trainings.find(t=>tkey(t.title)===tkey(p.title))||null; }
 // the training's "dates" text holds one line per batch, e.g. "Batch-I : 31 Aug. to 05 Sept.’26"
 function batchDates(t,batch){
   if(!t||!t.dates) return null;
@@ -911,7 +943,7 @@ function renderPartDetail(p){
   const box=document.getElementById('partDetail'); if(!box) return;
   if(!p){ box.style.display='none'; box.innerHTML=''; return; }
   const t=trainingOf(p);
-  const trainer=(t&&t.trainer)||p.trainer||'';                 // trainer always comes from the training itself, shown first
+  const trainer=p.trainer||(t&&t.trainer)||'';                 // trainer name written at the top of the training block in the Excel, shown first
   let from=fmtDay(p.fromDate), to=fmtDay(p.toDate);
   if(!from||!to){ const bd=batchDates(t,p.batch); if(bd){ from=from||bd.from; to=to||bd.to; } }
   const venue=p.location||(t&&t.location)||'';
